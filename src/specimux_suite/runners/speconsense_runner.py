@@ -72,11 +72,16 @@ class SpeconsenseRunner:
         self.config = config
         self.event_log = event_log
 
-    def run(self, specimen_id: str, specimen_fastq: Path, presample: int = 0) -> list[dict]:
+    def run(self, specimen_id: str, specimen_fastq: Path, presample: int = 0,
+            primers: Path | None = None) -> list[dict]:
         """Run speconsense on a specimen FASTQ.
 
         Args:
             presample: If > 0, pass --presample N to limit reads considered.
+            primers: Primer FASTA passed as --primers. Always pass one: without
+                it speconsense only looks for primers.fasta beside its input,
+                and the input is a snapshot in a directory that has none, so
+                primer trimming and primer orientation silently turn off.
 
         Returns list of cluster dicts. Always carries ``name`` and ``size``;
         ``ric``, ``rid``, ``rid_min``, ``primers``, ``ambig`` and (0.8.x only)
@@ -98,7 +103,8 @@ class SpeconsenseRunner:
             "read_count": read_count,
         })
 
-        cmd = self._build_command(specimen_fastq, staging, presample=presample)
+        cmd = self._build_command(specimen_fastq, staging, presample=presample,
+                                  primers=primers)
         logger.info(f"Running speconsense for {specimen_id}: {' '.join(str(c) for c in cmd)}")
 
         try:
@@ -186,13 +192,18 @@ class SpeconsenseRunner:
             "details": stderr[-2000:] if stderr else "",
         })
 
-    def _build_command(self, specimen_fastq: Path, output_dir: Path, presample: int = 0) -> list[str]:
+    def _build_command(self, specimen_fastq: Path, output_dir: Path, presample: int = 0,
+                       primers: Path | None = None) -> list[str]:
         """Build the speconsense command line."""
         cmd = [
             "speconsense",
             str(specimen_fastq),
             "-O", str(output_dir),
         ]
+        # Before the profile, overrides and escape hatch, so a user-supplied
+        # --primers there still wins (argparse keeps the last occurrence).
+        if primers is not None:
+            cmd.extend(["--primers", str(primers)])
         if presample > 0:
             cmd.extend(["--presample", str(presample)])
         # Profile

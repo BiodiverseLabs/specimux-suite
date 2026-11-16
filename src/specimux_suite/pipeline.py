@@ -109,6 +109,8 @@ class Pipeline:
 
         self._executor = ThreadPoolExecutor(max_workers=config.workers)
         self._futures: dict[str, Future] = {}
+        # Pool dirs already warned about a missing primers.fasta (warn once)
+        self._primer_fallback_warned: set[Path] = set()
         self._id_futures: dict[str, Future] = {}  # in-flight identification jobs
 
         # Cluster identifications are micro-batched: requests are collected
@@ -1097,15 +1099,43 @@ class Pipeline:
             logger.warning(f"Snapshot failed for {specimen_id}, using live file: {e}")
             snapshot = specimen_fastq
 
+        primers = self._consensus_primers(specimen_fastq)
+
         why = f", {reason}" if reason else ""
         logger.info(f"Submitting consensus job for {specimen_id} ({spec.total_reads} reads{why})")
-        future = self._executor.submit(self._run_consensus_job, specimen_id, snapshot, presample)
+        future = self._executor.submit(self._run_consensus_job, specimen_id, snapshot,
+                                       presample, primers)
         self._futures[specimen_id] = future
 
-    def _run_consensus_job(self, specimen_id: str, specimen_fastq: Path, presample: int = 0) -> list[dict]:
+    def _consensus_primers(self, specimen_fastq: Path) -> Path:
+        """Primer file for speconsense's --primers, resolved from the live FASTQ.
+
+        specimux writes each pool's primers to full/<pool>/primers.fasta, beside
+        the per-specimen FASTQs. speconsense would only find that file by
+        looking next to its input, and the input is a snapshot in the shared
+        snapshots/ dir, so it must be passed explicitly. Each specimen gets its
+        own pool's file; a shared copy in snapshots/ would trim every pool with
+        one pool's primers. If the pool file is missing, fall back to the run's
+        primers file (every pool's primers, same annotated format) — trimming
+        against extra primers beats silently untrimmed consensus.
+        """
+        pool_primers = specimen_fastq.parent / "primers.fasta"
+        if pool_primers.exists():
+            return pool_primers
+        if specimen_fastq.parent not in self._primer_fallback_warned:
+            self._primer_fallback_warned.add(specimen_fastq.parent)
+            logger.warning(
+                f"No primers.fasta in {specimen_fastq.parent}; speconsense will "
+                f"trim with the run's primers file {self.config.primers_file}"
+            )
+        return self.config.primers_file
+
+    def _run_consensus_job(self, specimen_id: str, specimen_fastq: Path, presample: int = 0,
+                           primers: Path | None = None) -> list[dict]:
         """Run consensus for a single specimen (executed in thread pool)."""
         try:
-            return self.speconsense.run(specimen_id, specimen_fastq, presample=presample)
+            return self.speconsense.run(specimen_id, specimen_fastq, presample=presample,
+                                        primers=primers)
         finally:
             if specimen_fastq.parent.name == "snapshots":
                 specimen_fastq.unlink(missing_ok=True)
