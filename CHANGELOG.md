@@ -5,7 +5,7 @@ Notable changes to specimux-suite. The format loosely follows
 [semantic versioning](https://semver.org/) within the 0.x caveat that
 minor releases may change APIs and formats.
 
-## Unreleased
+## 0.3.8 — 2026-11-15
 
 - **Fix: consensus sequences were not primer-trimmed.** The suite never
   passed `--primers` to speconsense, which then looks for `primers.fasta`
