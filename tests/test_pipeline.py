@@ -354,7 +354,7 @@ def test_consensus_reads_snapshot_not_live_file(tmp_path):
     pipeline.state.get_specimen("specimen_A").pool = "ITS"
     seen = {}
 
-    def fake_speconsense(sid, fastq, presample=0):
+    def fake_speconsense(sid, fastq, presample=0, primers=None):
         seen["path"] = Path(str(fastq))
         seen["content"] = fastq.read_text()
         return []
@@ -368,6 +368,66 @@ def test_consensus_reads_snapshot_not_live_file(tmp_path):
     assert seen["path"].name == "specimen_A.fastq"  # stem drives speconsense naming
     assert seen["content"] == live.read_text()
     assert not seen["path"].exists()  # cleaned up after the job
+    pipeline._executor.shutdown(wait=True)
+
+
+def _primer_pipeline(tmp_path, pools):
+    """Pipeline over a specimux output layout with one specimen per pool;
+    pools maps pool name -> primers.fasta text (None: no pool primer file)."""
+    config = _make_config(tmp_path)
+    (tmp_path / "reads.fastq").write_text("@r1\nACGT\n+\nIIII\n")
+    for pool, primers in pools.items():
+        pool_dir = config.specimux_output_dir / "full" / pool
+        pool_dir.mkdir(parents=True)
+        (pool_dir / f"specimen_{pool}.fastq").write_text("@r1\nACGT\n+\nIIII\n")
+        if primers is not None:
+            (pool_dir / "primers.fasta").write_text(primers)
+
+    with patch("specimux_suite.pipeline._check_tool_on_path", return_value=True):
+        from specimux_suite.pipeline import Pipeline
+        pipeline = Pipeline(config)
+    for pool in pools:
+        pipeline.state.get_specimen(f"specimen_{pool}").pool = pool
+
+    seen = {}
+
+    def fake_speconsense(sid, fastq, presample=0, primers=None):
+        seen[sid] = primers
+        return []
+    pipeline.speconsense = MagicMock()
+    pipeline.speconsense.run.side_effect = fake_speconsense
+    return pipeline, config, seen
+
+
+def test_consensus_trims_with_its_own_pools_primers(tmp_path):
+    """Each consensus job gets --primers from its own pool's specimux output,
+    not from the shared snapshots/ dir its input lives in (regression: the
+    snapshot move silently disabled primer trimming)."""
+    pipeline, config, seen = _primer_pipeline(tmp_path, {
+        "ITS": ">ITS1F position=forward pool=ITS\nCTTGGTCATTTAGAGGAAGTAA\n",
+        "LSU": ">LR0R position=forward pool=LSU\nACCCGCTGAACTTAAGC\n",
+    })
+    for pool in ("ITS", "LSU"):
+        pipeline._submit_consensus(f"specimen_{pool}")
+        pipeline._futures[f"specimen_{pool}"].result(timeout=10)
+
+    full = config.specimux_output_dir / "full"
+    assert seen["specimen_ITS"] == full / "ITS" / "primers.fasta"
+    assert seen["specimen_LSU"] == full / "LSU" / "primers.fasta"
+    assert not (config.output_dir / "snapshots" / "primers.fasta").exists()
+    pipeline._executor.shutdown(wait=True)
+
+
+def test_consensus_falls_back_to_run_primers(tmp_path, caplog):
+    """No pool primers.fasta: trim with the run's primers file and say so,
+    never run speconsense without primers."""
+    pipeline, config, seen = _primer_pipeline(tmp_path, {"ITS": None})
+    with caplog.at_level("WARNING", logger="specimux_suite.pipeline"):
+        pipeline._submit_consensus("specimen_ITS")
+        pipeline._futures["specimen_ITS"].result(timeout=10)
+
+    assert seen["specimen_ITS"] == config.primers_file
+    assert "No primers.fasta" in caplog.text
     pipeline._executor.shutdown(wait=True)
 
 

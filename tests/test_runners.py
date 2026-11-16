@@ -92,6 +92,38 @@ def test_speconsense_command_construction(tmp_path):
     assert "-O" in cmd
 
 
+def test_speconsense_command_carries_primers(tmp_path):
+    """--primers must be explicit: speconsense's fallback looks for
+    primers.fasta beside its input, and the input is a snapshot in a directory
+    without one, which silently disables primer trimming."""
+    config = _make_config(tmp_path)
+    runner = SpeconsenseRunner(config, EventLog(tmp_path / "events.jsonl"))
+    primers = Path("/out/specimux/full/ITS/primers.fasta")
+
+    cmd = runner._build_command(
+        Path("/out/snapshots/specimen_A.fastq"),
+        config.consensus_output_dir / "specimen_A",
+        primers=primers,
+    )
+
+    assert cmd[cmd.index("--primers") + 1] == str(primers)
+
+
+def test_speconsense_user_primers_override_wins(tmp_path):
+    """A --primers from the escape hatch comes after ours, so argparse keeps it."""
+    config = _make_config(tmp_path, speconsense_args=["--primers", "/mine.fasta"])
+    runner = SpeconsenseRunner(config, EventLog(tmp_path / "events.jsonl"))
+
+    cmd = runner._build_command(
+        Path("/out/snapshots/specimen_A.fastq"),
+        config.consensus_output_dir / "specimen_A",
+        primers=Path("/pool/primers.fasta"),
+    )
+
+    last = len(cmd) - 1 - cmd[::-1].index("--primers")
+    assert cmd[last + 1] == "/mine.fasta"
+
+
 def test_cluster_header_parsing_legacy_0_7():
     """0.7.x headers (-c{n} naming, no CER/err fields) parse correctly."""
     c0 = parse_cluster_header(">sample-c0 size=120 ric=100 rid=95.5")

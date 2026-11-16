@@ -5,6 +5,22 @@ Notable changes to specimux-suite. The format loosely follows
 [semantic versioning](https://semver.org/) within the 0.x caveat that
 minor releases may change APIs and formats.
 
+## Unreleased
+
+- **Fix: consensus sequences were not primer-trimmed.** The suite never
+  passed `--primers` to speconsense, which then looks for `primers.fasta`
+  only beside its input FASTQ. Since consensus started reading
+  copy-on-write snapshots in `snapshots/` (before 0.1.0), that directory
+  has no primer file, so every released version ran speconsense with
+  primer trimming and primer orientation off: each consensus kept both
+  primers, and degenerate primer positions were split into spurious
+  variants. Each consensus job now passes `--primers` with its own pool's
+  file (`specimux/full/<pool>/primers.fasta`); if that file is missing it
+  falls back to the run's primers file and logs a warning. A `--primers`
+  given in the profile or `--speconsense-args` still takes precedence.
+  Runs made with earlier versions should be re-run to get trimmed
+  consensus.
+
 ## 0.3.7 — 2026-09-25
 
 - **Host status on the dashboard.** `create_viewer_app` takes an optional
