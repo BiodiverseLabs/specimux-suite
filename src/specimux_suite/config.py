@@ -265,3 +265,29 @@ def _read_summarize_profile_filters(name: str) -> dict:
 
     logger.debug(f"Summarize profile '{name}' not found; using filter defaults")
     return {}
+
+
+TOOL_SECTIONS = ("specimux", "speconsense", "summarize")
+
+
+def parse_tool_settings(pairs: list[str]) -> dict[str, dict]:
+    """``--set TOOL.OPTION=VALUE`` items as ``{tool: {option: value}}``.
+
+    The option is the tool's own long option without the dashes, as in a
+    profile's ``specimux:``, ``speconsense:`` and ``summarize:`` sections;
+    ``true`` and ``false`` are flags, anything else is passed as written.
+    Raises ValueError for an item that is not ``tool.option=value`` or names
+    another tool.
+    """
+    settings: dict[str, dict] = {tool: {} for tool in TOOL_SECTIONS}
+    for item in pairs:
+        target, sep, value = item.partition("=")
+        tool, dot, option = target.strip().partition(".")
+        option = option.strip().lstrip("-")
+        if not sep or not dot or not option:
+            raise ValueError(f"--set takes TOOL.OPTION=VALUE, e.g. summarize.min-len=150 (got {item!r})")
+        if tool not in TOOL_SECTIONS:
+            raise ValueError(f"--set: unknown tool {tool!r} in {item!r}; choose from {', '.join(TOOL_SECTIONS)}")
+        value = value.strip()
+        settings[tool][option] = {"true": True, "false": False}.get(value.lower(), value)
+    return settings
