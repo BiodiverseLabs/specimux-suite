@@ -101,13 +101,20 @@ def main():
                 if not _arg_was_explicit(args, attr_name):
                     setattr(args, attr_name, profile.identify[yaml_key])
 
-    # --set: one run's own tool settings, over the profile's
+    # --set: one run's own tool settings, over the profile's. A tool's
+    # "profile" is its -p, as in a suite profile's sections: passed as an
+    # override it would reach the tool as a second --profile while
+    # resolve_summarize_thresholds (the dashboard's NS/LQ preview) still
+    # read the first.
     if args.set:
         from .config import parse_tool_settings
         try:
             run_settings = parse_tool_settings(args.set)
         except ValueError as e:
             parser.error(str(e))
+        specimux_profile = run_settings["specimux"].pop("profile", specimux_profile)
+        speconsense_profile = run_settings["speconsense"].pop("profile", speconsense_profile)
+        summarize_profile = run_settings["summarize"].pop("profile", summarize_profile)
         specimux_overrides = {**specimux_overrides, **run_settings["specimux"]}
         speconsense_overrides = {**speconsense_overrides, **run_settings["speconsense"]}
         summarize_overrides = {**summarize_overrides, **run_settings["summarize"]}
